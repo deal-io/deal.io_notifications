@@ -3,6 +3,8 @@ const admin = require('firebase-admin');
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 
+let serviceAccount = require('./serviceAccountKey.json');
+
 // initialize firebase
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -11,37 +13,42 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // get the customers and deals
-const getCustomersAndDeals = async () => {
-  const customersSnap = await db.collection('customers').get();
+const getDeals = async () => {
   const dealsSnap = await db.collection('deals').get();
 
-  const customers = customersSnap.docs.map(doc => doc.data());
-  const deals = dealsSnap.docs.map(doc => doc.data());
+  const deals = dealsSnap.docs.map(doc => {
+    const data = doc.data();
+    data.id = doc.id;  // Adding ID to the data
+    return data;
+});
 
-  return { customers, deals };
+  return deals;
 };
+
+function convertTo24HourMinus1Hour(timeStr) {
+    const time = new Date(`01/01/2020 ${timeStr}`);
+    let hours = time.getHours();
+    let minutes = time.getMinutes();
+  
+    hours = hours < 10 ? '0' + hours : hours;
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+  
+    return (hours - 1) + ':' + minutes;
+}
 
 // schedule notifications
 const scheduleNotifications = async () => {
-  const { customers, deals } = await getCustomersAndDeals();
+  const deals = await getDeals();
 
   // loop over each customer
-  for (let customer of customers) {
-    // loop over each favorite of the customer
-    for (let favorite of customer.favorites) {
-      // find the corresponding deal
-      const deal = deals.find(deal => deal.id === favorite);
-      if (!deal) continue;
+  for (let deal of deals) {
+    if (!deal.dealAttributes.daysActive[0]) continue;
 
-      // calculate the time one hour before the deal goes active
-      const dealTime = new Date(deal.startTime);
-      dealTime.setHours(dealTime.getHours() - 1);
-      const scheduleTime = `${dealTime.getHours()}:${dealTime.getMinutes()}`;
+    let dealName = deal.dealAttributes.dealName.replace(/'/g, "\\'"); // escape single quotes
 
-      // schedule the execution of the send_notification script
-      await exec(`echo "/path/to/send_notification.js ${customer.token} ${deal.id}" | at ${scheduleTime}`);
-    }
-  }
+    // schedule the execution of the send_notification script
+    await exec(`echo "./send_notification.js ${deal.id} '${dealName}'" | at ${convertTo24HourMinus1Hour(deal.dealAttributes.startTime)}`);
+}
 };
 
 scheduleNotifications();
