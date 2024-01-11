@@ -14,16 +14,17 @@ const db = admin.firestore();
 
 // get the customers and deals
 const getDeals = async () => {
-  const dealsSnap = await db.collection('deals').get();
+  const response = await fetch('https://dealio-backend-production.web.app/deal/active');
 
-  const deals = dealsSnap.docs.map(doc => {
-    const data = doc.data();
-    data.id = doc.id;  // Adding ID to the data
-    return data;
-});
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  const deals = await response.json();
 
   return deals;
 };
+
 
 function convertTo24HourMinus1Hour(timeStr) {
     const time = new Date(`01/01/2020 ${timeStr}`);
@@ -43,11 +44,14 @@ const scheduleNotifications = async () => {
   // loop over each customer
   for (let deal of deals) {
     if (!deal.dealAttributes.daysActive[0]) continue;
+    console.log(`${deal.dealAttributes.dealName}: ${deal.dealAttributes.daysActive}`);
 
     let dealName = deal.dealAttributes.dealName.replace(/'/g, "\\'"); // escape single quotes
 
     // schedule the execution of the send_notification script
-    await exec(`echo "./send_notification.js ${deal.id} '${dealName}'" | at ${convertTo24HourMinus1Hour(deal.dealAttributes.startTime)}`);
+    await exec(`echo "node ./send_notification.js ${deal.id} '${dealName}'" | at ${convertTo24HourMinus1Hour(deal.dealAttributes.startTime)}`);
+    console.log(`Scheduled notification for ${dealName} at ${convertTo24HourMinus1Hour(deal.dealAttributes.startTime)}`);
+    console.log();
 }
 };
 
